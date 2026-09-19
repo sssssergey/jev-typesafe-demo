@@ -14,12 +14,20 @@ export default function InvoiceTable({
 
   useEffect(() => {
     if (followRef.current && currentRow.current) {
-      currentRow.current.scrollIntoView({ block: "nearest" });
+      currentRow.current.scrollIntoView({ block: "center" });
     }
   }, [currentId, followRef]);
 
   return (
-    <section className="list" onScroll={onScroll}>
+    <section
+      className="list"
+      tabIndex={-1}
+      onWheel={onScroll}
+      onTouchMove={onScroll}
+      onKeyDown={(e) => {
+        if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(e.key)) onScroll();
+      }}
+    >
       <table>
         <thead>
           <tr>

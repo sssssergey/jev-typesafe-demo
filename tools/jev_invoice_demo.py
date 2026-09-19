@@ -109,6 +109,7 @@ class Invoice:
     po_number: str
     service: str
     sow: str
+    approved_line_items: tuple[LineItem, ...]
     line_items: tuple[LineItem, ...]
     approved_amount: float
     final_amount: float
@@ -442,6 +443,7 @@ def generate_invoices(
                     po_number=f"PO-{8800 + seq}",
                     service=job["service"],
                     sow=planted["sow"],
+                    approved_line_items=_lines(job["lines"]),
                     line_items=_lines(planted["lines"]),
                     approved_amount=planted["approved"],
                     final_amount=planted["final"],
@@ -481,6 +483,7 @@ def public_invoice(invoice: Invoice) -> dict[str, Any]:
         "po_number": invoice.po_number,
         "service": invoice.service,
         "sow": invoice.sow,
+        "approved_line_items": [asdict(item) for item in invoice.approved_line_items],
         "line_items": [asdict(item) for item in invoice.line_items],
         "approved_amount": invoice.approved_amount,
         "final_amount": invoice.final_amount,
@@ -523,6 +526,31 @@ def simulated_response(planted_kind: str) -> dict[str, Any]:
     }
 
 
+# Jev 1.13 list price (docs.typesafe.ai/models): $0.042 per million input tokens,
+# output tokens free. Override with TYPESAFE_INPUT_PRICE_PER_MTOK if the price changes.
+JEV_INPUT_PRICE_PER_MTOK = 0.042
+
+
+def usage_from_response(response: Any) -> tuple[int, int]:
+    """Return (input_tokens, output_tokens) from a Jev response, zeros when absent."""
+    usage = getattr(response, "usage", None)
+    if usage is None and isinstance(response, dict):
+        usage = response.get("usage")
+    if usage is None:
+        return 0, 0
+
+    def field(name: str) -> int:
+        value = usage.get(name) if isinstance(usage, dict) else getattr(usage, name, None)
+        return int(value or 0)
+
+    return field("input_tokens"), field("output_tokens")
+
+
+def estimate_cost_usd(input_tokens: int, price_per_mtok: float = JEV_INPUT_PRICE_PER_MTOK) -> float:
+    """Jev bills input tokens only, so the run cost is input tokens times the list price."""
+    return max(0, int(input_tokens)) / 1_000_000 * price_per_mtok
+
+
 def compose_from_response(response: Any) -> dict[str, Any]:
     amount_noul, scope_noul = nouls_from_response(response)
     return compose_result(amount_noul, scope_noul)
@@ -551,11 +579,14 @@ async def run_evaluations(
             try:
                 response = await ask(invoice_state(invoice), jev_questions())
                 composed = compose_from_response(response)
+                input_tokens, output_tokens = usage_from_response(response)
                 return {
                     "index": index,
                     "id": invoice.id,
                     "ok": True,
                     "latency_ms": (time.perf_counter() - started) * 1000,
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
                     **composed,
                 }
             except asyncio.CancelledError:

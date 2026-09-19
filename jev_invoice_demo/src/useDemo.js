@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { emptyBars, emptyThroughput } from "./format.js";
+import { emptyBars, emptyThroughput, emptyUsage } from "./format.js";
 
 const PREVIEW_BANNER =
   "Preview mode: answers are local stand-ins for planted cases. Add TYPESAFE_API_KEY to .env and restart for live Jev. The key stays on the server.";
@@ -39,15 +39,40 @@ export function useDemo() {
   const [throughput, setThroughput] = useState(emptyThroughput());
   const followRef = useRef(true);
 
+  const [liveElapsedMs, setLiveElapsedMs] = useState(0);
+  const startedAtRef = useRef(null);
+
   const setProgress = useCallback((event) => {
+    const elapsedMs = event.elapsed_ms ?? 0;
+    const usage = event.usage
+      ? {
+          inputTokens: event.usage.input_tokens ?? 0,
+          outputTokens: event.usage.output_tokens ?? 0,
+          pricePerMtok: event.usage.price_per_mtok ?? 0,
+          costUsd: event.usage.cost_usd ?? null,
+        }
+      : emptyUsage();
     setThroughput({
       done: event.done ?? 0,
       total: event.total ?? 0,
       perSec: event.per_sec ?? 0,
-      elapsedMs: event.elapsed_ms ?? 0,
+      elapsedMs,
+      usage,
     });
+    // Anchor the browser clock to the server's elapsed time so the counter ticks between events.
+    startedAtRef.current = performance.now() - elapsedMs;
+    setLiveElapsedMs(elapsedMs);
     if (event.bars) setBars(event.bars);
   }, []);
+
+  const ticking = runStatus === "running" || runStatus === "paused";
+  useEffect(() => {
+    if (!ticking) return undefined;
+    const timer = setInterval(() => {
+      if (startedAtRef.current != null) setLiveElapsedMs(performance.now() - startedAtRef.current);
+    }, 100);
+    return () => clearInterval(timer);
+  }, [ticking]);
 
   useEffect(() => {
     let cancelled = false;
@@ -131,7 +156,6 @@ export function useDemo() {
   }, [runStatus]);
 
   const selectInvoice = useCallback((id) => {
-    followRef.current = false;
     setSelectedId(id);
   }, []);
 
@@ -149,6 +173,7 @@ export function useDemo() {
     currentId,
     bars,
     throughput,
+    elapsedMs: ticking ? liveElapsedMs : throughput.elapsedMs,
     followRef,
     start,
     togglePause,

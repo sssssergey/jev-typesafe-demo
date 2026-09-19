@@ -15,12 +15,14 @@ sys.path.insert(0, str(PROJECT_ROOT / "tools"))
 from jev_invoice_demo import (  # noqa: E402
     DEFAULT_INVOICE_COUNT,
     DEFAULT_MIX,
+    JEV_INPUT_PRICE_PER_MTOK,
     FAIL_THRESHOLD,
     PASS_THRESHOLD,
     PLANTED_KINDS,
     classify_noul,
     compose_from_response,
     compose_result,
+    estimate_cost_usd,
     generate_invoices,
     simulated_response,
     invoice_state,
@@ -30,6 +32,7 @@ from jev_invoice_demo import (  # noqa: E402
     public_invoice,
     run_evaluations,
     tally_bars,
+    usage_from_response,
 )
 
 
@@ -111,6 +114,21 @@ def test_public_invoice_omits_planted_kind() -> None:
     assert public["approved_amount"] == invoice.approved_amount
 
 
+def test_public_invoice_carries_approved_scope_lines() -> None:
+    by_kind = {inv.planted_kind: inv for inv in generate_invoices()}
+    clean = public_invoice(by_kind["clean"])
+    assert clean["approved_line_items"] == clean["line_items"]
+
+    missing = public_invoice(by_kind["missing_scope"])
+    approved = {item["description"] for item in missing["approved_line_items"]}
+    billed = {item["description"] for item in missing["line_items"]}
+    assert approved - billed, "the dropped deliverable should only be on the PO side"
+    assert billed - approved, "the substitute should only be on the invoice side"
+
+    # The PO lines are UI-only context; the Jev state is unchanged.
+    assert "approved_line_items" not in invoice_state(by_kind["clean"])
+
+
 def test_classify_noul_thresholds() -> None:
     assert classify_noul(PASS_THRESHOLD) == "pass"
     assert classify_noul(0.99) == "pass"
@@ -153,6 +171,17 @@ def test_nouls_from_sdk_style_response() -> None:
     assert composed["scope_covered"]["verdict"] == "fail"
 
 
+def test_usage_and_cost_from_response() -> None:
+    sdk_style = SimpleNamespace(usage=SimpleNamespace(input_tokens=420, output_tokens=12))
+    assert usage_from_response(sdk_style) == (420, 12)
+    assert usage_from_response({"usage": {"input_tokens": 100, "output_tokens": None}}) == (100, 0)
+    assert usage_from_response(simulated_response("clean")) == (0, 0)
+    # Jev bills input only: 1M input tokens at the list price, output free.
+    assert estimate_cost_usd(1_000_000) == pytest.approx(JEV_INPUT_PRICE_PER_MTOK)
+    assert estimate_cost_usd(250_000, price_per_mtok=0.04) == pytest.approx(0.01)
+    assert estimate_cost_usd(0) == 0
+
+
 def test_nouls_from_raw_dict_response() -> None:
     response = {
         "answers": {
@@ -183,7 +212,8 @@ def test_run_evaluations_uses_injected_ask() -> None:
             nouls={
                 "amount_matches": SimpleNamespace(noul=amount),
                 "scope_covered": SimpleNamespace(noul=scope),
-            }
+            },
+            usage=SimpleNamespace(input_tokens=300, output_tokens=8),
         )
 
     async def collect() -> list[dict]:
@@ -193,6 +223,7 @@ def test_run_evaluations_uses_injected_ask() -> None:
     assert len(events) == 6
     assert set(seen) == {inv.invoice_number for inv in invoices}
     assert all(event["ok"] for event in events)
+    assert all(event["input_tokens"] == 300 and event["output_tokens"] == 8 for event in events)
     by_id = {event["id"]: event for event in events}
     missing = next(inv for inv in invoices if inv.planted_kind == "missing_scope")
     assert by_id[missing.id]["amount_matches"]["verdict"] == "pass"

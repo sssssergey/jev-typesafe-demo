@@ -1,4 +1,4 @@
-export default function Header({ runStatus, hasKey, simulate, onStart, onTogglePause }) {
+export default function Header({ runStatus, hasKey, simulate, theme, onToggleTheme, onStart, onTogglePause }) {
   const live = hasKey && !simulate;
   const canPause = runStatus === "running" || runStatus === "paused";
   return (
@@ -17,6 +17,15 @@ export default function Header({ runStatus, hasKey, simulate, onStart, onToggleP
         </button>
         <button className="btn" type="button" onClick={onTogglePause} disabled={!canPause}>
           {runStatus === "paused" ? "Resume" : "Pause"}
+        </button>
+        <button
+          className="btn icon"
+          type="button"
+          onClick={onToggleTheme}
+          aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+          title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+        >
+          {theme === "dark" ? "☀" : "☽"}
         </button>
       </div>
     </header>

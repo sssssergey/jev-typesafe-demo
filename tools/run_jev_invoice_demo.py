@@ -38,7 +38,9 @@ load_dotenv(PROJECT_ROOT / ".env")
 
 from jev_invoice_demo import (  # noqa: E402
     DEFAULT_INVOICE_COUNT,
+    JEV_INPUT_PRICE_PER_MTOK,
     empty_bar_counts,
+    estimate_cost_usd,
     generate_invoices,
     public_invoice,
     run_evaluations,
@@ -55,6 +57,14 @@ DEFAULT_CONCURRENCY = 12
 
 def has_api_key() -> bool:
     return bool(os.environ.get("TYPESAFE_API_KEY", "").strip())
+
+
+def input_price_per_mtok() -> float:
+    raw = os.environ.get("TYPESAFE_INPUT_PRICE_PER_MTOK", "").strip()
+    try:
+        return float(raw) if raw else JEV_INPUT_PRICE_PER_MTOK
+    except ValueError:
+        return JEV_INPUT_PRICE_PER_MTOK
 
 
 def ensure_ui_build() -> Path:
@@ -132,6 +142,8 @@ class DemoApp:
         self.results: list[dict[str, Any]] = []
         self.started_at: float | None = None
         self.finished_at: float | None = None
+        self.input_tokens = 0
+        self.output_tokens = 0
         self._pause = threading.Event()
         self._pause.set()
         self._run_task: asyncio.Task[Any] | None = None
@@ -159,8 +171,19 @@ class DemoApp:
                     "elapsed_ms": elapsed_ms,
                     "per_sec": per_sec,
                     "bars": tally_bars(self.results) if self.results else empty_bar_counts(),
+                    "usage": self._usage_payload(),
                 },
             }
+
+    def _usage_payload(self) -> dict[str, Any]:
+        """Token totals for the current/last run. Cost is only meaningful for live Jev calls."""
+        price = input_price_per_mtok()
+        return {
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "price_per_mtok": price,
+            "cost_usd": None if self.simulate else estimate_cost_usd(self.input_tokens, price),
+        }
 
     def start(self, concurrency: int = DEFAULT_CONCURRENCY) -> dict[str, Any]:
         if not has_api_key() and not self.simulate:
@@ -189,6 +212,8 @@ class DemoApp:
         self.results = []
         self.started_at = time.perf_counter()
         self.finished_at = None
+        self.input_tokens = 0
+        self.output_tokens = 0
         self._pause.set()
         self.bus.emit({"type": "hello", "total": len(self.invoices), "concurrency": concurrency})
         self._run_task = asyncio.create_task(self._run(concurrency))
@@ -221,6 +246,7 @@ class DemoApp:
             "elapsed_ms": elapsed_ms,
             "per_sec": per_sec,
             "bars": tally_bars(self.results) if self.results else empty_bar_counts(),
+            "usage": self._usage_payload(),
         }
 
     async def _before_ask(self) -> None:
@@ -272,6 +298,8 @@ class DemoApp:
             ):
                 if event.get("ok"):
                     self.results.append(event)
+                    self.input_tokens += int(event.get("input_tokens") or 0)
+                    self.output_tokens += int(event.get("output_tokens") or 0)
                 self.done += 1
                 payload = {**event, "type": "result", **self._progress_payload()}
                 self.bus.emit(payload)

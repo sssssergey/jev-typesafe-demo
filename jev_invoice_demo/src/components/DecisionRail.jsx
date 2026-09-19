@@ -1,4 +1,4 @@
-import { money } from "../format.js";
+import { formatCost, formatDuration } from "../format.js";
 
 function StackedBar({ counts }) {
   const total = counts.pass + counts.review + counts.fail;
@@ -39,9 +39,44 @@ function NoulTrack({ label, answer }) {
   );
 }
 
-export default function DecisionRail({ invoices, selectedId, currentId, bars, throughput }) {
-  const selected = invoices.find((inv) => inv.id === selectedId);
+function durationLabel(runStatus) {
+  if (runStatus === "running") return "running";
+  if (runStatus === "paused") return "paused";
+  return "last run duration";
+}
+
+function CostCard({ usage, live, hasRun }) {
+  const tokens = `${usage.inputTokens.toLocaleString("en-US")} input tokens`;
+  if (!live) {
+    return (
+      <div className="box cost">
+        <b>—</b>
+        <span>preview mode, no Jev charge</span>
+      </div>
+    );
+  }
+  return (
+    <div className="box cost">
+      <b>{hasRun ? formatCost(usage.costUsd) : "—"}</b>
+      <span>
+        last run cost · {tokens}
+        {usage.pricePerMtok ? ` @ $${usage.pricePerMtok}/M` : ""}
+      </span>
+    </div>
+  );
+}
+
+export default function DecisionRail({
+  invoices,
+  currentId,
+  bars,
+  throughput,
+  elapsedMs,
+  runStatus,
+  live,
+}) {
   const current = invoices.find((inv) => inv.id === currentId);
+  const hasRun = throughput.done > 0 || runStatus === "running";
 
   return (
     <aside className="rail">
@@ -53,10 +88,15 @@ export default function DecisionRail({ invoices, selectedId, currentId, bars, th
           </b>
           <span>invoices reviewed</span>
         </div>
+        <div className={`box timer ${runStatus}`}>
+          <b>{hasRun ? formatDuration(elapsedMs || 0) : "—"}</b>
+          <span>{durationLabel(runStatus)}</span>
+        </div>
         <div className="box">
           <b>{(throughput.perSec || 0).toFixed(1)} /s</b>
-          <span>{((throughput.elapsedMs || 0) / 1000).toFixed(1)}s elapsed</span>
+          <span>invoices per second</span>
         </div>
+        <CostCard usage={throughput.usage} live={live} hasRun={hasRun} />
       </div>
 
       <h2>Amount match</h2>
@@ -83,36 +123,7 @@ export default function DecisionRail({ invoices, selectedId, currentId, bars, th
         <NoulTrack label="amount" answer={current?.amount_matches} />
         <NoulTrack label="scope" answer={current?.scope_covered} />
       </div>
-
-      <h2>Selected invoice</h2>
-      <div className="detail">
-        {selected ? (
-          <>
-            <h3>
-              {selected.invoice_number} · {selected.vendor}
-            </h3>
-            <p>{selected.sow}</p>
-            {selected.change_order ? (
-              <p>
-                <b>Change order.</b> {selected.change_order}
-              </p>
-            ) : null}
-            <p>{selected.delivery_notes}</p>
-            <ul>
-              {(selected.line_items || []).map((item) => (
-                <li key={item.description}>
-                  {item.description} — {money(item.amount)}
-                </li>
-              ))}
-            </ul>
-            <p>
-              Approved {money(selected.approved_amount)} · final {money(selected.final_amount)}
-            </p>
-          </>
-        ) : (
-          <p>Click a row to read the SOW, lines, and delivery notes Jev sees.</p>
-        )}
-      </div>
+      <p className="hint">Click a row to compare the approved scope with what was delivered and billed.</p>
     </aside>
   );
 }

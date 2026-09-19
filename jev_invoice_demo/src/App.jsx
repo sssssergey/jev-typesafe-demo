@@ -1,10 +1,14 @@
 import DecisionRail from "./components/DecisionRail.jsx";
 import Header from "./components/Header.jsx";
+import InvoiceDialog from "./components/InvoiceDialog.jsx";
 import InvoiceTable from "./components/InvoiceTable.jsx";
 import { useDemo } from "./useDemo.js";
+import { useTheme } from "./useTheme.js";
 
 export default function App() {
   const demo = useDemo();
+  const { theme, toggle: toggleTheme } = useTheme();
+  const selected = demo.invoices.find((inv) => inv.id === demo.selectedId) || null;
 
   return (
     <div className="app">
@@ -12,6 +16,8 @@ export default function App() {
         runStatus={demo.runStatus}
         hasKey={demo.hasKey}
         simulate={demo.simulate}
+        theme={theme}
+        onToggleTheme={toggleTheme}
         onStart={demo.start}
         onTogglePause={demo.togglePause}
       />
@@ -27,12 +33,15 @@ export default function App() {
         />
         <DecisionRail
           invoices={demo.invoices}
-          selectedId={demo.selectedId}
           currentId={demo.currentId}
           bars={demo.bars}
           throughput={demo.throughput}
+          elapsedMs={demo.elapsedMs}
+          runStatus={demo.runStatus}
+          live={demo.hasKey && !demo.simulate}
         />
       </main>
+      <InvoiceDialog invoice={selected} onClose={() => demo.selectInvoice(null)} />
     </div>
   );
 }
